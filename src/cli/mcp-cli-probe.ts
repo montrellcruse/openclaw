@@ -86,7 +86,7 @@ export async function probeMcpServers(
       // Disposal is best effort; joining exposes any unconfirmed closure.
       await runtime.joinCleanup?.();
     } catch (err) {
-      cleanupError = formatErrorMessage(err);
+      cleanupError = `${formatErrorMessage(err)}. Check the MCP server's session termination support, then rerun this command.`;
     }
   }
   return { ...result, ...(cleanupError ? { cleanupError } : {}) };

@@ -18,6 +18,8 @@ import { runCliWithExitFinalization } from "./one-shot-exit.js";
 const SESSION_ID = "cli-cleanup-fixture-session";
 const PROTOCOL_VERSION = "2025-11-25";
 const CLEANUP_ERROR = "MCP runtime cleanup could not confirm closure";
+const CLEANUP_ERROR_WITH_RECOVERY =
+  /MCP runtime cleanup could not confirm closure.*session termination support.*rerun/;
 const CATALOG_ERROR = "fixture catalog unavailable";
 
 describe("MCP CLI cleanup reporting", () => {
@@ -178,8 +180,8 @@ describe("MCP CLI cleanup reporting", () => {
         expect(mockError).not.toHaveBeenCalled();
         expect(process.exitCode).toBeUndefined();
       } else {
-        expect(result.cleanupError).toContain(CLEANUP_ERROR);
-        expect(errors()).toContain(CLEANUP_ERROR);
+        expect(result.cleanupError).toMatch(CLEANUP_ERROR_WITH_RECOVERY);
+        expect(errors()).toMatch(CLEANUP_ERROR_WITH_RECOVERY);
         expect(process.exitCode).toBe(1);
       }
     });
@@ -189,10 +191,10 @@ describe("MCP CLI cleanup reporting", () => {
     await withMcpConfig({ docs: serverConfig() }, async () => {
       await probe([]);
 
-      expect(mockLog.mock.calls.map(([line]) => String(line)).join("\n")).toContain(
-        "- docs: 1 tools",
-      );
-      expect(errors()).toContain(CLEANUP_ERROR);
+      const output = mockLog.mock.calls.map(([line]) => String(line)).join("\n");
+      expect(output).toContain("- docs: 1 tools");
+      expect(output).toMatch(CLEANUP_ERROR_WITH_RECOVERY);
+      expect(errors()).toMatch(CLEANUP_ERROR_WITH_RECOVERY);
       expect(process.exitCode).toBe(1);
     });
   });
@@ -210,7 +212,7 @@ describe("MCP CLI cleanup reporting", () => {
             name: "docs",
             ok: false,
             issues: expect.arrayContaining([
-              { level: "error", message: expect.stringContaining(CLEANUP_ERROR) },
+              { level: "error", message: expect.stringMatching(CLEANUP_ERROR_WITH_RECOVERY) },
             ]),
           },
         ],
@@ -230,7 +232,8 @@ describe("MCP CLI cleanup reporting", () => {
 
         await expect(runMcpCommand(args)).rejects.toMatchObject({ code: 1 });
 
-        expect(errors()).toContain(CLEANUP_ERROR);
+        expect(errors()).toMatch(CLEANUP_ERROR_WITH_RECOVERY);
+        expect(errors()).toContain("Configuration was not saved.");
         expect(await fs.readFile(configPath, "utf8")).toBe(before);
         expect(deleteHeaders).toEqual([{ session: SESSION_ID, protocol: PROTOCOL_VERSION }]);
       });
@@ -248,6 +251,7 @@ describe("MCP CLI cleanup reporting", () => {
       });
       expect(errors()).toContain(CATALOG_ERROR);
       expect(errors()).toContain(CLEANUP_ERROR);
+      expect(errors().indexOf(CATALOG_ERROR)).toBeLessThan(errors().indexOf(CLEANUP_ERROR));
       expect(process.exitCode).toBe(1);
       expect(deleteHeaders).toEqual([{ session: SESSION_ID, protocol: PROTOCOL_VERSION }]);
     });

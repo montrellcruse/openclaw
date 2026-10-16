@@ -582,7 +582,7 @@ async function probeMcpServersOrFail(params: {
   const result = await probeMcpServers("openclaw-cli-mcp-probe", params.config, probeServers);
   const probeIssue = resolveMcpProbeIssue({ result, servers: params.servers, path: params.path });
   if (probeIssue) {
-    fail(probeIssue);
+    fail(`${probeIssue}\nConfiguration was not saved.`);
   }
 }
 
