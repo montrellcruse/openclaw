@@ -50,6 +50,7 @@ type ActiveReplySteerFallbackReason =
   | "model-fallback-changed";
 
 type ActiveReplySteerParams = {
+  assertSourceCurrent?: () => void;
   followupRun: RunReplyAgentParams["followupRun"];
   opts: RunReplyAgentParams["opts"];
   providedReplyOperation: ReplyOperation | undefined;
@@ -118,6 +119,7 @@ export async function runActiveReplySteer(
     resolveFollowupAbortSignal(followupRun)?.throwIfAborted();
     params.opts?.abortSignal?.throwIfAborted();
     followupRun.operatorAuthority?.assertCurrent();
+    params.assertSourceCurrent?.();
   };
   let steerSessionId = activeReplyOperation?.sessionId ?? followupRun.run.sessionId;
   const parked = parkSteerCandidate(queueKey, followupRun, resolvedQueue, runFollowup);
@@ -242,6 +244,7 @@ export async function runActiveReplySteer(
     const assertLegacyPolicyCurrent = () =>
       assertPolicy(resolveFollowupRunToolAuthorityFingerprint(followupRun, automaticFallbackRoute));
     const sourceBound = Boolean(
+      params.assertSourceCurrent ||
       automaticFallbackRoute ||
       followupRun.operatorAuthority ||
       followupRun.abortSignal ||

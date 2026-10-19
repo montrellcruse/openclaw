@@ -1,15 +1,10 @@
 // Discord tests cover native command.plugin dispatch plugin behavior.
 import { ChannelType } from "discord-api-types/v10";
-import * as agentRuntime from "openclaw/plugin-sdk/agent-runtime";
 import * as channelInbound from "openclaw/plugin-sdk/channel-inbound";
 import type { NativeCommandSpec } from "openclaw/plugin-sdk/command-auth-native";
 import * as commandStatus from "openclaw/plugin-sdk/command-status-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { PlatformMessageNotDispatchedError } from "openclaw/plugin-sdk/error-runtime";
-import {
-  findCommandByNativeName,
-  listNativeCommandSpecsForConfig,
-} from "openclaw/plugin-sdk/native-command-registry";
 import {
   createPluginCommandRuntime,
   PLUGIN_COMMAND_DISPATCH,
@@ -26,15 +21,16 @@ import {
   setRuntimeConfigSnapshot,
 } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import * as sessionStore from "openclaw/plugin-sdk/session-store-runtime";
-import { createOpenClawTestState } from "openclaw/plugin-sdk/test-state";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { installDiscordIngressTestRuntime } from "../test-support/ingress-runtime.js";
 import { defineThrowingDiscordChannelGetter } from "../test-support/partial-channel.js";
-import * as pickerPreferences from "./model-picker-preferences.js";
-import * as pickerState from "./model-picker.state.js";
-import { createModelsProviderData } from "./model-picker.test-utils.js";
 import { dispatchDiscordNativeAgentReply } from "./native-command-agent-reply.js";
 import * as nativeCommandRoute from "./native-command-route.js";
+import {
+  createNativeDispatchConfig as createConfig,
+  registerNativeRegistryRoutingCases,
+  type MockCalls,
+} from "./native-command.plugin-dispatch.registry.cases.js";
 import {
   createMockCommandInteraction as createInteraction,
   createRouteState,
@@ -111,18 +107,6 @@ function dispatchAgentReply(
   });
 }
 
-function createConfig(): OpenClawConfig {
-  return {
-    channels: {
-      discord: {
-        dm: { enabled: true },
-        dmPolicy: "open",
-        allowFrom: ["*"],
-      },
-    },
-  } as OpenClawConfig;
-}
-
 async function createNativeCommand(
   cfg: OpenClawConfig,
   commandSpec: NativeCommandSpec = {
@@ -145,10 +129,6 @@ async function createNativeCommand(
     dispatchReplyFromConfig,
   });
 }
-
-type MockCalls = {
-  mock: { calls: unknown[][] };
-};
 
 function isObjectValue(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -401,141 +381,14 @@ describe("Discord native plugin command dispatch", () => {
     expect(observedNativeTurnDispatcher).toBe(dispatchReplyFromConfig);
   });
 
-  it("routes the current native registry and a dynamic skill through the Discord adapter", async () => {
-    // Adapter routing only: core execution, provider discovery and Discord transport are fixtures.
-    // The real reply/cohort regression belongs to the core owner, not this mocked dispatcher.
-    const state = await createOpenClawTestState({ label: "discord-native-registry-routing" });
-    try {
-      const cfg: OpenClawConfig = {
-        ...createConfig(),
-        commands: { config: true, mcp: true, plugins: true, debug: true },
-        agents: { defaults: { model: { primary: "openai/fixture-model" } } },
-      };
-      await state.writeConfig(cfg);
-      vi.spyOn(agentRuntime, "loadPreparedModelCatalog").mockResolvedValue([]);
-      const pickerCatalog = vi
-        .spyOn(pickerState, "loadDiscordModelPickerData")
-        .mockResolvedValue(createModelsProviderData({ openai: ["fixture-model"] }));
-      vi.spyOn(pickerPreferences, "readDiscordModelPickerRecentModels").mockResolvedValue([]);
-      const specs = listNativeCommandSpecsForConfig(cfg, {
-        provider: "discord",
-        includeBundledChannelFallback: false,
-        skillCommands: [
-          { name: "fixture-skill", skillName: "fixture-skill", description: "A dynamic skill" },
-        ],
-      });
-      expect(specs.some((spec) => spec.name === "fixture-skill")).toBe(true);
-
-      for (const spec of specs) {
-        vi.clearAllMocks();
-        const interaction = createInteraction();
-        const command = await createNativeCommand(cfg, spec);
-        const definition = findCommandByNativeName(spec.name, "discord", {
-          includeBundledChannelFallback: false,
-        });
-
-        // Missing arguments are deliberate: retain the real menus and pickers instead of
-        // manufacturing an argument that sends every command down the same reply branch.
-        await command.run(interaction);
-
-        expect(runtimeModuleMocks.pluginCommandHandler, spec.name).not.toHaveBeenCalled();
-        const dispatch = runtimeModuleMocks.dispatchReplyWithDispatcher;
-        const status = runtimeModuleMocks.resolveDirectStatusReplyForSession;
-        if (definition?.key === "status") {
-          expect(status, spec.name).toHaveBeenCalledExactlyOnceWith(
-            expect.objectContaining({
-              sessionKey: "agent:main:discord:dm:owner",
-              isAuthorizedSender: true,
-            }),
-          );
-          expectFollowUpFields(interaction, { content: "status reply" });
-          expect(dispatch, spec.name).not.toHaveBeenCalled();
-          expect(pickerCatalog, spec.name).not.toHaveBeenCalled();
-        } else if (definition?.key === "model" || definition?.key === "models") {
-          expect(pickerCatalog, spec.name).toHaveBeenCalledExactlyOnceWith(cfg, "main", {
-            sessionEntry: undefined,
-          });
-          expect(dispatch, spec.name).not.toHaveBeenCalled();
-          expect(status, spec.name).not.toHaveBeenCalled();
-          const payload = requireRecord(firstMockArg(interaction.followUp, spec.name), spec.name);
-          expect(
-            Array.isArray(payload.components) && payload.components.length > 0,
-            spec.name,
-          ).toBe(true);
-        } else if (definition?.argsMenu && definition.argsParsing !== "none") {
-          const payload = expectSingleCallFirstArg(
-            interaction.followUp,
-            { ephemeral: true },
-            spec.name,
-          );
-          expect(
-            Array.isArray(payload.components) && payload.components.length > 0,
-            spec.name,
-          ).toBe(true);
-          expect(dispatch, spec.name).not.toHaveBeenCalled();
-          expect(status, spec.name).not.toHaveBeenCalled();
-          expect(pickerCatalog, spec.name).not.toHaveBeenCalled();
-        } else {
-          const dispatched = expectSingleCallFirstArg(dispatch, {}, spec.name);
-          expectFields(requireRecord(dispatched.ctx, `${spec.name} context`), {
-            SessionKey: "agent:main:discord:slash:owner",
-            CommandTargetSessionKey: "agent:main:discord:dm:owner",
-            CommandSource: "native",
-            CommandAuthorized: true,
-            commandText: `/${definition?.nativeName ?? spec.name}`,
-          });
-          const replyOptions = requireRecord(dispatched.replyOptions, `${spec.name} reply options`);
-          expect((replyOptions as Record<PropertyKey, unknown>)[PLUGIN_COMMAND_DISPATCH]).toEqual({
-            kind: "non-plugin",
-          });
-          expect(status, spec.name).not.toHaveBeenCalled();
-          expect(pickerCatalog, spec.name).not.toHaveBeenCalled();
-        }
-      }
-    } finally {
-      await state.cleanup();
-    }
-  });
-
-  it("denies the current native registry before status, menus, or command effects", async () => {
-    const cfg: OpenClawConfig = {
-      ...createConfig(),
-      commands: {
-        config: true,
-        mcp: true,
-        plugins: true,
-        debug: true,
-        allowFrom: { discord: ["user:allowed-sender"] },
-      },
-    };
-    const catalog = vi.spyOn(agentRuntime, "loadPreparedModelCatalog");
-    const pickerCatalog = vi.spyOn(pickerState, "loadDiscordModelPickerData");
-    for (const spec of listNativeCommandSpecsForConfig(cfg, {
-      provider: "discord",
-      includeBundledChannelFallback: false,
-      skillCommands: [
-        { name: "fixture-skill", skillName: "fixture-skill", description: "A dynamic skill" },
-      ],
-    })) {
-      vi.clearAllMocks();
-      const interaction = createInteraction({ userId: "denied-sender" });
-      const command = await createNativeCommand(cfg, spec);
-
-      await command.run(interaction);
-
-      expectFollowUpFields(interaction, {
-        content: "You are not authorized to use this command.",
-        ephemeral: true,
-      });
-      expect(runtimeModuleMocks.dispatchReplyWithDispatcher, spec.name).not.toHaveBeenCalled();
-      expect(
-        runtimeModuleMocks.resolveDirectStatusReplyForSession,
-        spec.name,
-      ).not.toHaveBeenCalled();
-      expect(runtimeModuleMocks.pluginCommandHandler, spec.name).not.toHaveBeenCalled();
-      expect(catalog, spec.name).not.toHaveBeenCalled();
-      expect(pickerCatalog, spec.name).not.toHaveBeenCalled();
-    }
+  registerNativeRegistryRoutingCases({
+    createNativeCommand,
+    runtimeModuleMocks,
+    expectFollowUpFields,
+    requireRecord,
+    firstMockArg,
+    expectSingleCallFirstArg,
+    expectFields,
   });
 
   it("refreshes native command routing config between invocations", async () => {

@@ -59,6 +59,7 @@ import { registerReplyAdmissionCases } from "./agent-runner.runreplyagent.admiss
 import { registerImmediateFailurePolicyCases } from "./agent-runner.runreplyagent.failure-policy.cases.js";
 import { createReplyAgentSessionFixture } from "./agent-runner.runreplyagent.fixture.test-support.js";
 import { registerFollowupDrainCases } from "./agent-runner.runreplyagent.followup-drain.cases.js";
+import { registerNativeReservationCases } from "./agent-runner.runreplyagent.native-reservation.cases.js";
 import { registerRequiredReplyCompletionCases } from "./agent-runner.runreplyagent.required-reply.cases.js";
 import { registerSteeringReceiptCases } from "./agent-runner.runreplyagent.steering-receipts.cases.js";
 import { registerWaitingStatusCases } from "./agent-runner.runreplyagent.waiting-status.cases.js";
@@ -85,11 +86,10 @@ import {
   type ReplyOperation,
   replyRunRegistry,
 } from "./reply-run-registry.js";
-import { getReplyOperationSessionReader } from "./reply-run-registry.state.js";
 import { testing as replyRunTesting } from "./reply-run-registry.test-support.js";
 import { bindReplyOperationTyping } from "./reply-run-typing.js";
 import { prepareReplyToolAuthority } from "./reply-tool-authority.js";
-import { admitReplyTurn, runWithReplyOperationLifecycleAdmission } from "./reply-turn-admission.js";
+import { runWithReplyOperationLifecycleAdmission } from "./reply-turn-admission.js";
 import { consumeReplyUsageState } from "./reply-usage-state.js";
 import { buildChannelSourceTurnId, setChannelSourceTurnId } from "./source-turn-id.js";
 import { createMockTypingController } from "./test-helpers.js";
@@ -1224,90 +1224,14 @@ describe("runReplyAgent active steering", () => {
     expect(state.runEmbeddedAgentMock).toHaveBeenCalledOnce();
   });
 
-  it.each(["current", "aborted", "released"] as const)(
-    "steers with a $0 source-keyed native reservation only while it is current",
-    async (sourceState) => {
-      // A native command continuation whose target-slot adoption was skipped
-      // (#104844) still carries its slash-source reservation; steering must
-      // target the operation that owns this session's run slot.
-      const targetKey = "agent:main:discord:channel:steer-target";
-      const sourceKey = "agent:main:discord:slash:steer-user";
-      const { sessionEntry, sessionStore, storePath } = await makeSessionFixture(
-        { sessionId: "target-active-session" },
-        targetKey,
-      );
-      const sourceEntry = makeSessionEntry({ sessionId: "source-reservation-session" });
-      await replaceSessionEntry({ storePath, sessionKey: sourceKey }, sourceEntry);
-      const admitted = await admitReplyTurn({
-        agentId: "main",
-        sessionKey: sourceKey,
-        sessionId: sourceEntry.sessionId,
-        storePath,
-        kind: "visible",
-        resetTriggered: false,
-      });
-      if (admitted.status !== "owned") {
-        throw new Error("Expected native command source admission");
-      }
-      sessionKeys.add(sourceKey);
-      expect(getReplyOperationSessionReader(admitted.operation)).toBeDefined();
-      state.queueEmbeddedAgentMessageMock.mockReturnValueOnce(true);
-      const targetOwner = createReplyOperation({
-        sessionKey: targetKey,
-        sessionId: "target-active-session",
-        resetTriggered: false,
-      });
-      targetOwner.setPhase("running");
-      const { run } = createMinimalRun({
-        sessionKey: targetKey,
-        sessionEntry,
-        sessionStore,
-        storePath,
-        isActive: true,
-        shouldSteer: true,
-        resolvedQueueMode: "steer",
-        replyOperation: admitted.operation,
-        sessionCtx: {
-          Provider: "discord",
-          SessionKey: sourceKey,
-          CommandTargetSessionKey: targetKey,
-          CommandSource: "native",
-        },
-        runOverrides: {
-          agentId: "main",
-          sessionId: sessionEntry.sessionId,
-          sessionKey: targetKey,
-          config: { session: { store: storePath } },
-        },
-      });
-      try {
-        if (sourceState !== "current") {
-          if (sourceState === "aborted") {
-            expect(admitted.operation.abortByUser()).toBe(true);
-            await expect(run()).rejects.toBe(admitted.operation.abortSignal.reason);
-          } else {
-            admitted.operation.complete();
-            await expect(run()).rejects.toThrow("Session reader operation is no longer current");
-          }
-          expect(state.queueEmbeddedAgentMessageMock).not.toHaveBeenCalled();
-          expect(state.runEmbeddedAgentMock).not.toHaveBeenCalled();
-          expect(replyRunRegistry.get(targetKey)).toBe(targetOwner);
-          return;
-        }
-        await expect(run()).resolves.toBeUndefined();
-        expect(state.queueEmbeddedAgentMessageMock).toHaveBeenCalledExactlyOnceWith(
-          "target-active-session",
-          "hello",
-          expect.objectContaining({ steeringMode: "all" }),
-        );
-        expect(state.runEmbeddedAgentMock).not.toHaveBeenCalled();
-        expect(replyRunRegistry.get(targetKey)).toBe(targetOwner);
-      } finally {
-        targetOwner.complete();
-        admitted.operation.complete();
-      }
-    },
-  );
+  registerNativeReservationCases({
+    createMinimalRun,
+    makeSessionEntry,
+    makeSessionFixture,
+    parkedSteer,
+    sessionKeys,
+    state,
+  });
 
   it("waits for transcript commit and keeps a rejected adoption finalizer irrevocably adopted", async () => {
     const active = createReplyOperation({
