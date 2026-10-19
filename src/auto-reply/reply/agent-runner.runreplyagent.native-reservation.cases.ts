@@ -109,7 +109,7 @@ export function registerNativeReservationCases({
       targetOwner.setPhase("running");
       const preparationStarted = createDeferred();
       const continuePreparation = createDeferred();
-      const readSessionEntry = entryReads.readSessionEntryInWorker;
+      const readSessionEntryInWorker = entryReads.readSessionEntryInWorker;
       const targetRead =
         revokeAt === "target-read"
           ? vi
@@ -117,7 +117,7 @@ export function registerNativeReservationCases({
               .mockImplementationOnce(async (...args) => {
                 // Keep the real SQLite read and its authority checks; hold only
                 // publication of its result to the awaiting runner.
-                const entry = await readSessionEntry(...args);
+                const entry = await readSessionEntryInWorker(...args);
                 preparationStarted.resolve();
                 await continuePreparation.promise;
                 return entry;
