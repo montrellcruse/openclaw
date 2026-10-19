@@ -107,6 +107,65 @@ describe("direct status selection is read-only", () => {
     },
   );
 
+  it("keeps an unpinned Discord parent and pinned thread status isolated", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+      await state.writeConfig(cfg);
+      setRuntimeConfigSnapshot(cfg);
+      await state.writeAuthProfiles({
+        version: 1,
+        profiles: {
+          "anthropic:thread": {
+            type: "api_key",
+            provider: "anthropic",
+            key: "synthetic-thread-status-key",
+          },
+        },
+      });
+      const parentKey = "agent:main:discord:channel:111111111111111111";
+      const threadKey = "agent:main:discord:channel:222222222222222222";
+      const parent = { agentId: "main", sessionKey: parentKey, env: state.env };
+      const thread = { agentId: "main", sessionKey: threadKey, env: state.env };
+      replaceSessionEntrySync(parent, {
+        sessionId: "discord-parent-session",
+        updatedAt: 1,
+        modelProvider: "anthropic",
+        model,
+      });
+      replaceSessionEntrySync(thread, {
+        sessionId: "discord-thread-session",
+        updatedAt: 2,
+        modelProvider: "anthropic",
+        model,
+        parentSessionKey: parentKey,
+        authProfileOverride: "anthropic:thread",
+        authProfileOverrideSource: "auto",
+      });
+      const parentBefore = loadExactSessionEntryReadOnly(parent)?.entry;
+      const threadBefore = loadExactSessionEntryReadOnly(thread)?.entry;
+      expect(parentBefore?.authProfileOverride).toBeUndefined();
+      expect(threadBefore?.authProfileOverride).toBe("anthropic:thread");
+
+      for (const [targetKey, expectedSessionId] of [
+        [parentKey, "discord-parent-session"],
+        [threadKey, "discord-thread-session"],
+      ] as const) {
+        const result = await resolveDirectStatusReplyForSessionCore({
+          cfg,
+          sessionKey: targetKey,
+          channel: "discord",
+          senderIsOwner: true,
+          isAuthorizedSender: true,
+          isGroup: true,
+          defaultGroupActivation: () => "mention",
+        });
+
+        expect(result?.text).toBe(`Status for ${targetKey}: ${expectedSessionId}`);
+        expect(loadExactSessionEntryReadOnly(parent)?.entry).toEqual(parentBefore);
+        expect(loadExactSessionEntryReadOnly(thread)?.entry).toEqual(threadBefore);
+      }
+    });
+  });
+
   it("does not reset a disallowed saved model while rendering status", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
       await state.writeConfig(cfg);
