@@ -3695,7 +3695,6 @@
 ["src/auto-reply/reply/agent-runner.media-paths.test-harness.ts","../../cli/command-secret-targets.js","1a5015bed31646a7668562d75c2785d5e308c2395355fd2bb0070b938544cf01",1]
 ["src/auto-reply/reply/agent-runner.media-paths.test-harness.ts","../../media/outbound-attachment.js","0fa0f56f6bacba1b04e41bed97d80604d9fe4a412392eed81770a4eb1122b865",1]
 ["src/auto-reply/reply/agent-runner.media-paths.test-harness.ts","./agent-runner-memory.js","34a046b92ff351b49882431903696c5e30ec355ffd6fcb6d9faf8b9e4d4131cc",1]
-["src/auto-reply/reply/agent-runner.media-paths.test-harness.ts","./queue.js","4d92672809f711cad5f9611bf582abaa9674ca2a67f4289849b6adeac2cdd51f",1]
 ["src/auto-reply/reply/agent-runner.media-paths.test-harness.ts","./session-updates.js","a398fcf2ce1aedf4215ecc2ea96134b48f611304287c0342e54249b0e6847d30",1]
 ["src/auto-reply/reply/agent-runner.media-paths.test-harness.ts","./session-usage.js","094ee1fa3182f3ee62981f82ff53c2631df28ee5ac59bfa33f48a84b3a124c7d",1]
 ["src/auto-reply/reply/agent-runner.misc.runreplyagent.test-support.ts","../../acp/control-plane/manager.js","e699a9900de9380d8d3341f92df66be95f2a94257d98334b974f4e592e15e628",1]
